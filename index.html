@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#06090d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Vätskelabbet</title>
+<style>
+/* Layout: the liquid fills the screen; one control strip at the bottom, the settings sheet slides over it. */
+:root {
+  --ink: #06090d;          /* screen behind the tank */
+  --panel: rgba(12, 18, 26, 0.86);
+  --line: rgba(150, 190, 220, 0.16);
+  --text: #d8e6f0;
+  --dim: #7f95a6;
+  --accent: #4fc3ff;
+  --warn: #ffb347;
+  --ui: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text); font: 14px/1.35 var(--ui); overflow: hidden; overscroll-behavior: none; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#c2 { pointer-events: none; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+#hud { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 8px); left: calc(env(safe-area-inset-left, 0px) + 10px);
+  font: 11px/1.4 var(--mono); color: var(--dim); pointer-events: none; white-space: pre; text-shadow: 0 1px 2px #000; display: flex; gap: 10px; align-items: flex-start; }
+#gdial { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); position: relative; flex: none; }
+#gdial i { position: absolute; left: 50%; top: 50%; width: 2px; height: 13px; margin-left: -1px; background: var(--accent); transform-origin: 50% 0; border-radius: 1px; }
+
+#bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  padding: 10px max(12px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 10px) max(12px, env(safe-area-inset-left, 0px)); pointer-events: none; }
+#bar > * { pointer-events: auto; }
+.pill { border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-radius: 999px; padding: 9px 14px; cursor: pointer; white-space: nowrap; }
+.pill:active { transform: scale(0.97); }
+.pill.on { border-color: var(--accent); color: var(--accent); }
+.pill.warn { border-color: var(--warn); color: var(--warn); }
+#btnSensor .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); margin-right: 7px; vertical-align: 1px; }
+#btnSensor.live .dot { background: #5fe08a; box-shadow: 0 0 6px #5fe08a; }
+#btnSensor.warn .dot { background: var(--warn); }
+
+#panel { position: fixed; left: 0; right: 0; bottom: 0; max-height: 64%; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: var(--panel); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-top: 1px solid var(--line);
+  border-radius: 18px 18px 0 0; padding: 6px max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 16px) max(16px, env(safe-area-inset-left, 0px));
+  transform: translateY(105%); transition: transform 0.22s ease; z-index: 5; touch-action: pan-y; }
+#panel.open { transform: none; }
+@media (min-width: 760px) { #panel { left: auto; top: 0; width: 360px; max-height: none; border-radius: 0; border-top: 0; border-left: 1px solid var(--line); transform: translateX(105%); padding-top: calc(env(safe-area-inset-top, 0px) + 10px); } }
+@media (prefers-reduced-motion: reduce) { #panel { transition: none; } }
+.phead { position: sticky; top: -6px; display: flex; align-items: center; justify-content: space-between; padding: 10px 0 8px; background: linear-gradient(var(--panel) 70%, transparent); z-index: 1; }
+.phead b { font-size: 16px; letter-spacing: 0.02em; }
+.phead button { border: 0; background: none; color: var(--dim); padding: 6px 4px; cursor: pointer; }
+h3 { margin: 16px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.row label { font-size: 14px; }
+.row output { font: 12px var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; align-self: center; }
+.row small { grid-column: 1 / -1; color: var(--dim); font-size: 12px; }
+.row input[type=range] { grid-column: 1 / -1; width: 100%; margin: 6px 0 2px; accent-color: var(--accent); height: 26px; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 4px; }
+.seg button { flex: 1 1 auto; min-width: 64px; border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 8px 8px; cursor: pointer; }
+.seg button.on { border-color: var(--accent); color: var(--accent); background: rgba(79, 195, 255, 0.08); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.note { color: var(--dim); font-size: 12px; margin: 8px 0 0; }
+#qr { margin-top: 10px; display: flex; gap: 12px; align-items: center; }
+#qr canvas, #qr img { position: static; width: 112px !important; height: 112px !important; background: #fff; padding: 6px; border-radius: 8px; }
+#qr code { font: 12px var(--mono); word-break: break-all; color: var(--text); }
+#toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 14px); transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line);
+  padding: 8px 14px; border-radius: 10px; font-size: 13px; z-index: 9; max-width: 90vw; text-align: center; }
+
+/* watches and other tiny screens: only a corner button, the sheet takes the whole screen */
+@media (max-width: 320px), (max-height: 320px) {
+  #hud { display: none; }
+  #bar { justify-content: flex-end; padding: 6px; }
+  #bar .pill:not(#btnPanel) { display: none; }
+  #btnPanel { padding: 6px 10px; font-size: 12px; opacity: 0.6; }
+  #panel { max-height: 100%; top: 0; border-radius: 0; font-size: 13px; }
+}
+body.clean #hud, body.clean #bar { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Vätskesimulering, dra för att röra om"></canvas>
+<canvas id="c2"></canvas>
+<div id="hud"><div id="gdial" title="Gravitationens riktning"><i></i></div><span id="stats"></span></div>
+<div id="bar">
+  <button class="pill" id="btnSensor"><span class="dot"></span><span>Sensor</span></button>
+  <button class="pill" id="btnReset">Nollställ</button>
+  <button class="pill" id="btnFull">Helskärm</button>
+  <button class="pill" id="btnPanel">Reglage</button>
+</div>
+<aside id="panel" aria-label="Reglage">
+  <div class="phead"><b>Vätskelabbet</b><button id="btnClose">Stäng</button></div>
+  <div id="controls"></div>
+  <div class="actions">
+    <button class="pill" id="btnCopy">Kopiera inställningar</button>
+    <button class="pill" id="btnDefaults">Standardvärden</button>
+  </div>
+  <p class="note">Dra med fingret eller musen för att röra om. Piltangenter lutar på en dator. Trippeltryck döljer knapparna.</p>
+  <div id="qrbox" hidden><h3>Öppna på telefonen</h3><div id="qr"></div></div>
+</aside>
+<div id="toast" hidden></div>
+
+<script src="fluid-core.js"></script>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const G0 = 9.81;
+
+/* ---------- settings ---------- */
+const DEFAULTS = {
+  source: 'sensor', shape: 'screen', output: 'smooth', palette: 'water',
+  gravity: 1, inertia: 1, size: 1, flip: 0.9, damping: 0.05, fill: 0.4, drift: 1,
+  cells: 40, iters: 30, outW: 16, threshold: 0.45, angle: 0, invert: 'auto',
+};
+const PRESETS = {
+  'Vatten':   { flip: 0.9, damping: 0.05, gravity: 1, size: 1, drift: 1 },
+  'Honung':   { flip: 0.05, damping: 1.5, gravity: 1, size: 1, drift: 1 },
+  'Plask':    { flip: 0.98, damping: 0.01, gravity: 1.4, size: 0.6, drift: 1.5 },
+  'Rymd':     { flip: 0.95, damping: 0.02, gravity: 0.15, size: 1, drift: 1 },
+  'LED 8×8':  { shape: 'square', output: 'led', outW: 8, cells: 20, fill: 0.45, palette: 'water' },
+  'LED 32×8': { shape: 'wide4', output: 'led', outW: 32, cells: 48, fill: 0.4 },
+  'Klocka':   { shape: 'circle', output: 'smooth', cells: 28, fill: 0.5, size: 0.5 },
+};
+let S = Object.assign({}, DEFAULTS);
+try { Object.assign(S, JSON.parse(localStorage.getItem('fluidlab.settings') || '{}')); } catch (e) {}
+const save = () => { try { localStorage.setItem('fluidlab.settings', JSON.stringify(S)); } catch (e) {} };
+
+const SHAPES = { screen: 'Skärmen', square: 'Kvadrat', circle: 'Cirkel', wide2: '2:1', wide4: '4:1' };
+const PALETTES = {
+  water: { name: 'Vatten', bg: [6, 9, 13], deep: [14, 70, 150], shallow: [50, 160, 225], foam: [225, 245, 255] },
+  lava:  { name: 'Lava', bg: [14, 7, 6], deep: [150, 22, 8], shallow: [255, 110, 20], foam: [255, 230, 150] },
+  neon:  { name: 'Neon', bg: [7, 6, 15], deep: [90, 20, 190], shallow: [255, 50, 170], foam: [130, 255, 240] },
+  mono:  { name: 'Vit', bg: [0, 0, 0], deep: [170, 170, 170], shallow: [235, 235, 235], foam: [255, 255, 255] },
+};
+
+// sliders: log ones where the ear/eye hears ratios
+const SLIDERS = [
+  { sec: 'Kraft' },
+  { k: 'gravity', label: 'Gravitation', min: 0, max: 3, fmt: v => v.toFixed(2) + ' g', help: 'Hur hårt vätskan dras mot lutningens botten.' },
+  { k: 'inertia', label: 'Tröghet (skak)', min: 0, max: 4, fmt: v => v.toFixed(2) + '×', help: 'Hur mycket telefonens rörelser skvalpar vätskan. 1 = fysikaliskt.' },
+  { k: 'angle', label: 'Vinkel (manuell)', min: -180, max: 180, step: 1, fmt: v => Math.round(v) + '°', only: () => S.source === 'manual' },
+  { sec: 'Vätska' },
+  { k: 'size', label: 'Tankens storlek', min: 0.05, max: 10, log: true, fmt: v => v < 1 ? Math.round(v * 100) + ' cm' : v.toFixed(1) + ' m', help: 'Liten tank = snabba, nervösa vågor. Stor = långsamma dyningar.' },
+  { k: 'flip', label: 'Livlighet', min: 0, max: 1, fmt: v => v.toFixed(2), help: '0 = tjock och lugn (PIC), 1 = livlig och stänkande (FLIP).' },
+  { k: 'damping', label: 'Viskositet', min: 0.001, max: 10, log: true, fmt: v => v.toFixed(v < 0.1 ? 3 : 2) + ' /s', help: 'Hur fort rörelse dör ut.' },
+  { k: 'drift', label: 'Volymhållning', min: 0, max: 4, fmt: v => v.toFixed(2), help: 'Trycker isär hopklämd vätska så den inte krymper.' },
+  { k: 'fill', label: 'Mängd', min: 0.02, max: 0.9, fmt: v => Math.round(v * 100) + ' %', rebuild: true },
+  { sec: 'Upplösning' },
+  { k: 'cells', label: 'Simceller i bredd', min: 4, max: 256, log: true, step: 1, fmt: v => Math.round(v), rebuild: true, help: 'Kostnaden. Partiklar ≈ celler² × mängd × 3.' },
+  { k: 'iters', label: 'Tryckiterationer', min: 4, max: 200, log: true, step: 1, fmt: v => Math.round(v), help: 'Fler = styvare vätska, mer CPU.' },
+  { k: 'outW', label: 'Utdata i bredd (px / LED)', min: 2, max: 256, log: true, step: 1, fmt: v => Math.round(v), only: () => S.output !== 'smooth' },
+  { k: 'threshold', label: 'Ytans tröskel', min: 0.1, max: 0.9, fmt: v => v.toFixed(2), help: 'Lägre = tjockare, mjukare kanter.' },
+];
+
+/* ---------- sim ---------- */
+let sim = null;
+let view = { w: 1, h: 1, dpr: 1 };
+function tankAspect() {
+  switch (S.shape) {
+    case 'square': case 'circle': return 1;
+    case 'wide2': return view.w > view.h ? 0.5 : 2;
+    case 'wide4': return view.w > view.h ? 0.25 : 4;
+    default: return view.h / view.w;
+  }
+}
+function simParams() {
+  return { flipRatio: S.flip, damping: S.damping, driftK: S.drift, pressureIters: Math.round(S.iters) };
+}
+function rebuild() {
+  const g = sim ? [sim.gx, sim.gy] : [0, G0];
+  sim = new FluidCore.FluidSim({ cellsX: Math.round(S.cells), aspect: tankAspect(), shape: S.shape === 'circle' ? 'circle' : 'box',
+    width: S.size, fill: S.fill, params: simParams() });
+  sim.gx = g[0]; sim.gy = g[1];
+  sim.build(); // re-seed downhill along the current gravity
+  layout();
+}
+let rebuildTimer = 0;
+const rebuildSoon = () => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuild, 120); };
+
+/* ---------- layout ---------- */
+const cv = $('#c'), cv2 = $('#c2');
+let tank = { x: 0, y: 0, w: 1, h: 1 };        // css px
+function layout() {
+  if (!sim) return;
+  const W = view.w, H = view.h, asp = sim.innerY / sim.innerX;
+  let w, h;
+  if (S.shape === 'screen') { w = W; h = H; }
+  else {
+    const m = Math.min(W, H) * 0.06;
+    w = W - 2 * m; h = w * asp;
+    if (h > H - 2 * m) { h = H - 2 * m; w = h / asp; }
+  }
+  tank = { x: (W - w) / 2, y: (H - h) / 2, w, h };
+}
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const w = Math.max(1, window.innerWidth), h = Math.max(1, window.innerHeight);
+  const changed = Math.abs(w - view.w) > 2 || Math.abs(h - view.h) > 2;
+  view = { w, h, dpr };
+  for (const c of [cv, cv2]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  if (gl) gl.viewport(0, 0, cv.width, cv.height);
+  if (sim && changed && (S.shape === 'screen' || S.shape.startsWith('wide'))) rebuildSoon(); else layout();
+}
+
+/* ---------- GPU renderer ---------- */
+let gl = null, prog = null, tex = null, texBuf = null, U = {};
+function initGL() {
+  try { gl = cv.getContext('webgl', { antialias: false, alpha: false, preserveDrawingBuffer: false }); } catch (e) { gl = null; }
+  if (!gl) return false;
+  const deriv = gl.getExtension('OES_standard_derivatives');
+  const vs = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+  const fs = (deriv ? '#extension GL_OES_standard_derivatives : enable\n' : '') + `
+precision mediump float;
+uniform sampler2D f; uniform vec4 rect; uniform float viewH; uniform vec4 uv; uniform float thr; uniform float circle;
+uniform vec3 bg, deep, shallow, foam; uniform float px;
+void main(){
+  vec2 fc = vec2(gl_FragCoord.x, viewH - gl_FragCoord.y);
+  vec2 t = (fc - rect.xy) / rect.zw;
+  vec3 col = bg;
+  float inside = step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0);
+  float edge = 0.0;
+  if (circle > 0.5) {
+    float d = length(t - 0.5) - 0.5;
+    float aa = px / rect.z;
+    inside = 1.0 - smoothstep(-aa, aa, d);
+    edge = 1.0 - smoothstep(0.0, aa * 2.0, abs(d - aa * 1.5));
+  }
+  if (inside > 0.0) {
+    vec4 s = texture2D(f, mix(uv.xy, uv.zw, clamp(t, 0.0, 1.0)));
+    float c = s.r * 2.0;
+    ${deriv ? 'float w = max(fwidth(c), 0.02);' : 'float w = 0.06;'}
+    float a = smoothstep(thr - w, thr + w, c);
+    float depth = smoothstep(thr + 0.05, thr + 0.4, c);
+    vec3 liq = mix(shallow, deep, depth);
+    liq = mix(liq, foam, smoothstep(0.35, 1.3, s.g) * 0.75);
+    liq += (1.0 - smoothstep(thr, thr + 0.18, c)) * 0.22;
+    col = mix(bg * 1.6 + 0.012, liq, a);
+    col = mix(bg, col, inside);
+  }
+  col = mix(col, vec3(0.35, 0.45, 0.55), edge * 0.5);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  try {
+    prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch (e) { console.warn('WebGL off:', e); gl = null; return false; }
+  gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  for (const n of ['f', 'rect', 'viewH', 'uv', 'thr', 'circle', 'bg', 'deep', 'shallow', 'foam', 'px']) U[n] = gl.getUniformLocation(prog, n);
+  tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  return true;
+}
+const c3 = (a) => a.map(x => x / 255);
+function drawGL() {
+  const fnx = sim.fnx, fny = sim.fny, n = fnx * fny;
+  if (!texBuf || texBuf.length !== n * 4) texBuf = new Uint8Array(n * 4);
+  const F = sim.F, Sp = sim.S;
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const f = F[i] < 0 ? 0 : F[i];
+    texBuf[j] = f >= 2 ? 255 : f * 127.5;
+    const s = Sp[i] * 127.5; texBuf[j + 1] = s > 255 ? 255 : s;
+    texBuf[j + 2] = 0; texBuf[j + 3] = 255;
+  }
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fnx, fny, 0, gl.RGBA, gl.UNSIGNED_BYTE, texBuf);
+  const d = view.dpr, P = PALETTES[S.palette] || PALETTES.water;
+  gl.uniform1i(U.f, 0);
+  gl.uniform4f(U.rect, tank.x * d, tank.y * d, tank.w * d, tank.h * d);
+  gl.uniform1f(U.viewH, cv.height);
+  gl.uniform4fv(U.uv, sim.fieldUV());
+  gl.uniform1f(U.thr, S.threshold);
+  gl.uniform1f(U.circle, S.shape === 'circle' ? 1 : 0);
+  gl.uniform1f(U.px, d);
+  gl.uniform3fv(U.bg, c3(P.bg)); gl.uniform3fv(U.deep, c3(P.deep)); gl.uniform3fv(U.shallow, c3(P.shallow)); gl.uniform3fv(U.foam, c3(P.foam));
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* ---------- CPU renderer: pixels and LEDs ---------- */
+const ctx2 = cv2.getContext('2d');
+let cov = null, spd = null, pixCanvas = document.createElement('canvas'), pixCtx = pixCanvas.getContext('2d'), pixImg = null;
+function outSize() {
+  if (S.output === 'smooth') { // no-WebGL fallback: half-resolution pixels
+    const w = Math.max(8, Math.round(tank.w / 3));
+    return [w, Math.max(2, Math.round(w * sim.innerY / sim.innerX))];
+  }
+  const w = Math.round(S.outW);
+  return [w, Math.max(1, Math.round(w * sim.innerY / sim.innerX))];
+}
+function mixc(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+function draw2D() {
+  const [ow, oh] = outSize(), n = ow * oh;
+  if (!cov || cov.length !== n) { cov = new Float32Array(n); spd = new Float32Array(n); }
+  sim.rasterize(ow, oh, cov, spd, S.threshold, 0.12);
+  const P = PALETTES[S.palette] || PALETTES.water, d = view.dpr;
+  ctx2.setTransform(1, 0, 0, 1, 0, 0);
+  ctx2.fillStyle = `rgb(${P.bg})`; ctx2.fillRect(0, 0, cv2.width, cv2.height);
+  if (S.output === 'led') {
+    // physical-LED preview: dark board, one round LED per output value
+    const pitch = Math.min(tank.w / ow, tank.h / oh) * d;
+    const ox = (tank.x + tank.w / 2) * d - pitch * ow / 2, oy = (tank.y + tank.h / 2) * d - pitch * oh / 2;
+    ctx2.fillStyle = '#0d1012'; ctx2.fillRect(ox - pitch * 0.3, oy - pitch * 0.3, pitch * (ow + 0.6), pitch * (oh + 0.6));
+    const r = pitch * 0.36;
+    for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+      const v = cov[y * ow + x];
+      if (v < 0) continue;
+      const cx = ox + (x + 0.5) * pitch, cy = oy + (y + 0.5) * pitch;
+      const col = mixc(P.deep, P.foam, clamp(spd[y * ow + x] - 0.35, 0, 1) * 0.7);
+      ctx2.fillStyle = '#16191b';
+      ctx2.beginPath(); ctx2.arc(cx, cy, r, 0, 6.2832); ctx2.fill();
+      if (v > 0.004) {
+        const b = v; // linear coverage = perceived brightness; real LEDs need gamma on top
+        ctx2.globalCompositeOperation = 'lighter';
+        ctx2.fillStyle = `rgba(${col[0] | 0},${col[1] | 0},${col[2] | 0},${(b * 0.18).toFixed(3)})`;
+        ctx2.beginPath(); ctx2.arc(cx, cy, r * 1.9, 0, 6.2832); ctx2.fill();
+        ctx2.fillStyle = `rgba(${col[0] | 0},${col[1] | 0},${col[2] | 0},${b.toFixed(3)})`;
+        ctx2.beginPath(); ctx2.arc(cx, cy, r, 0, 6.2832); ctx2.fill();
+        ctx2.globalCompositeOperation = 'source-over';
+      }
+    }
+    return;
+  }
+  // pixel output (also the no-WebGL fallback)
+  if (pixCanvas.width !== ow || pixCanvas.height !== oh) { pixCanvas.width = ow; pixCanvas.height = oh; pixImg = pixCtx.createImageData(ow, oh); }
+  const px = pixImg.data, bg = P.bg.map(x => x * 1.6 + 3);
+  for (let i = 0; i < n; i++) {
+    const v = cov[i], j = i * 4;
+    if (v < 0) { px[j] = P.bg[0]; px[j + 1] = P.bg[1]; px[j + 2] = P.bg[2]; px[j + 3] = 255; continue; }
+    const liq = mixc(P.shallow, P.deep, 0.6), c = mixc(liq, P.foam, clamp(spd[i] - 0.35, 0, 1) * 0.7), o = mixc(bg, c, v);
+    px[j] = o[0]; px[j + 1] = o[1]; px[j + 2] = o[2]; px[j + 3] = 255;
+  }
+  pixCtx.putImageData(pixImg, 0, 0);
+  ctx2.imageSmoothingEnabled = S.output === 'smooth';
+  const pitch = Math.min(tank.w / ow, tank.h / oh);
+  const w = pitch * ow * d, h = pitch * oh * d;
+  ctx2.drawImage(pixCanvas, (tank.x + tank.w / 2) * d - w / 2, (tank.y + tank.h / 2) * d - h / 2, w, h);
+}
+
+/* ---------- gravity sources ---------- */
+const motion = { has: false, last: 0, ax: 0, ay: 9.81, lx: 0, ly: 0, linear: false, lpx: 0, lpy: 9.81, votes: 0, invert: false };
+function screenAngle() {
+  if (typeof window.orientation === 'number') return window.orientation;
+  return (screen.orientation && screen.orientation.angle) || 0;
+}
+window.addEventListener('devicemotion', e => {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  motion.has = true; motion.last = performance.now();
+  motion.ax = a.x; motion.ay = a.y;
+  const l = e.acceleration;
+  if (l && l.x != null) { motion.linear = true; motion.lx = l.x; motion.ly = l.y; } else motion.linear = false;
+});
+// Some browsers report accelerationIncludingGravity with flipped signs. Vote with
+// the orientation's tilt: held upright (beta ~ 90) the spec says a.y ~ +9.8.
+window.addEventListener('deviceorientation', e => {
+  if (e.beta == null || !motion.has) return;
+  const sb = Math.sin(e.beta * Math.PI / 180);
+  if (Math.abs(sb) > 0.5 && Math.abs(motion.ay) > 4) {
+    motion.votes = clamp(motion.votes + (Math.sign(sb) === Math.sign(motion.ay) ? 1 : -1), -20, 20);
+    if (Math.abs(motion.votes) >= 8) motion.invert = motion.votes < 0;
+  }
+});
+function sensorAlive() { return motion.has && performance.now() - motion.last < 1500; }
+const gstate = { gx: 0, gy: G0, t: 0, key: 0 };
+function updateGravity(dt) {
+  const k = S.gravity;
+  let gx, gy;
+  const src = S.source === 'sensor' && !sensorAlive() ? 'auto' : S.source;
+  if (src === 'sensor') {
+    const sign = (S.invert === 'auto' ? motion.invert : S.invert === 'yes') ? -1 : 1;
+    const ax = motion.ax * sign, ay = motion.ay * sign;
+    // gravity part and shake part; without a linear sensor, split with a low-pass
+    let gxD, gyD, lxD, lyD;
+    if (motion.linear) { lxD = motion.lx * sign; lyD = motion.ly * sign; gxD = ax - lxD; gyD = ay - lyD; }
+    else {
+      const a = 1 - Math.exp(-dt / 0.12);
+      motion.lpx += (ax - motion.lpx) * a; motion.lpy += (ay - motion.lpy) * a;
+      gxD = motion.lpx; gyD = motion.lpy; lxD = ax - gxD; lyD = ay - gyD;
+    }
+    // felt force in the device frame = -(specific force); shake scaled separately
+    let fx = -gxD * k - lxD * S.inertia, fy = -gyD * k - lyD * S.inertia;
+    // device axes -> screen axes (x right, y up), then y down
+    const th = screenAngle() * Math.PI / 180, c = Math.cos(th), s = Math.sin(th);
+    const sx = fx * c - fy * s, sy = fx * s + fy * c;
+    gx = sx; gy = -sy;
+  } else if (src === 'manual') {
+    const a = S.angle * Math.PI / 180;
+    gx = Math.sin(a) * G0 * k; gy = Math.cos(a) * G0 * k;
+  } else { // screensaver sway
+    gstate.t += dt;
+    const t = gstate.t, a = 0.75 * Math.sin(t * 0.47) + 1.1 * Math.sin(t * 0.13 + 1.3) + 0.25 * Math.sin(t * 1.9);
+    gx = Math.sin(a) * G0 * k; gy = Math.cos(a) * G0 * k;
+  }
+  sim.gx = gx; sim.gy = gy;
+  return src;
+}
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (S.source !== 'manual') setVal('source', 'manual');
+    setVal('angle', clamp(S.angle + (e.key === 'ArrowLeft' ? 10 : -10), -180, 180));
+    e.preventDefault();
+  }
+});
+
+/* ---------- stirring with a finger ---------- */
+const ptr = { down: false, x: 0, y: 0, px: 0, py: 0, id: null };
+function toSim(cx, cy) {
+  const tx = (cx - tank.x) / tank.w, ty = (cy - tank.y) / tank.h;
+  return sim.tankToSim(tx, ty);
+}
+cv.addEventListener('pointerdown', e => {
+  if (ptr.down) return;
+  ptr.down = true; ptr.id = e.pointerId; cv.setPointerCapture(e.pointerId);
+  [ptr.x, ptr.y] = toSim(e.clientX, e.clientY); ptr.px = ptr.x; ptr.py = ptr.y;
+  tripleTap(); wake();
+});
+cv.addEventListener('pointermove', e => { if (ptr.down && e.pointerId === ptr.id) [ptr.x, ptr.y] = toSim(e.clientX, e.clientY); });
+const up = e => { if (e.pointerId === ptr.id) { ptr.down = false; ptr.id = null; } };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+let taps = [];
+function tripleTap() {
+  const t = performance.now(); taps = taps.filter(x => t - x < 450); taps.push(t);
+  if (taps.length >= 3) { document.body.classList.toggle('clean'); taps = []; }
+}
+function updateObstacle(dt) {
+  const ob = sim.obstacle;
+  ob.r = 0.09 * Math.min(sim.innerX, sim.innerY) * sim.h + sim.h * 0.5;
+  if (ptr.down) {
+    ob.vx = (ptr.x - ptr.px) / dt; ob.vy = (ptr.y - ptr.py) / dt;
+    ob.x = ptr.x; ob.y = ptr.y; ob.active = true;
+  } else ob.active = false;
+  ptr.px = ptr.x; ptr.py = ptr.y;
+}
+
+/* ---------- UI ---------- */
+const ctl = $('#controls');
+const inputs = {};
+function seg(key, title, opts) {
+  const h = document.createElement('h3'); h.textContent = title; ctl.appendChild(h);
+  const box = document.createElement('div'); box.className = 'seg'; box.dataset.key = key;
+  for (const [v, label] of Object.entries(opts)) {
+    const b = document.createElement('button'); b.textContent = label; b.dataset.v = v;
+    b.onclick = () => setVal(key, v); box.appendChild(b);
+  }
+  ctl.appendChild(box); inputs[key] = box;
+}
+function presetRow() {
+  const h = document.createElement('h3'); h.textContent = 'Förinställningar'; ctl.appendChild(h);
+  const box = document.createElement('div'); box.className = 'seg';
+  for (const name of Object.keys(PRESETS)) {
+    const b = document.createElement('button'); b.textContent = name;
+    b.onclick = () => applyPreset(name); box.appendChild(b);
+  }
+  ctl.appendChild(box);
+}
+const toPos = (d, v) => d.log ? Math.log(v / d.min) / Math.log(d.max / d.min) * 1000 : (v - d.min) / (d.max - d.min) * 1000;
+const fromPos = (d, p) => { let v = d.log ? d.min * Math.pow(d.max / d.min, p / 1000) : d.min + (d.max - d.min) * p / 1000; if (d.step) v = Math.round(v / d.step) * d.step; return v; };
+function buildUI() {
+  presetRow();
+  seg('source', 'Gravitation från', { sensor: 'Sensor', auto: 'Auto (skärmsläckare)', manual: 'Manuell' });
+  seg('shape', 'Form', SHAPES);
+  seg('output', 'Utdata', { smooth: 'Slät', pixels: 'Pixlar', led: 'LED' });
+  seg('palette', 'Färg', Object.fromEntries(Object.entries(PALETTES).map(([k, p]) => [k, p.name])));
+  for (const d of SLIDERS) {
+    if (d.sec) { const h = document.createElement('h3'); h.textContent = d.sec; ctl.appendChild(h); continue; }
+    const row = document.createElement('div'); row.className = 'row';
+    const id = 's_' + d.k;
+    row.innerHTML = `<label for="${id}">${d.label}</label><output></output><input type="range" id="${id}" min="0" max="1000" step="1">${d.help ? `<small>${d.help}</small>` : ''}`;
+    const inp = row.querySelector('input'), out = row.querySelector('output');
+    inp.oninput = () => setVal(d.k, fromPos(d, +inp.value), true);
+    ctl.appendChild(row);
+    inputs[d.k] = { d, inp, out, row };
+  }
+  seg('invert', 'Sensoraxlar', { auto: 'Auto', no: 'Normal', yes: 'Inverterad' });
+  syncUI();
+}
+function syncUI() {
+  for (const [k, el] of Object.entries(inputs)) {
+    if (el.classList) { for (const b of el.children) b.classList.toggle('on', b.dataset.v === String(S[k])); continue; }
+    if (document.activeElement !== el.inp) el.inp.value = toPos(el.d, S[k]);
+    el.out.textContent = el.d.fmt(S[k]);
+    el.row.hidden = el.d.only ? !el.d.only() : false;
+  }
+}
+function setVal(k, v, fromSlider) {
+  const old = S[k]; S[k] = v; save();
+  const d = SLIDERS.find(x => x.k === k);
+  if (k === 'size') sim.setWidth(v);
+  else if (k === 'shape') { rebuild(); }
+  else if (d && d.rebuild) rebuildSoon();
+  else if (k === 'output' && v !== 'smooth') { /* nothing to rebuild */ }
+  Object.assign(sim.params, simParams());
+  if (!fromSlider || old !== v) syncUI();
+  if (k === 'output' || k === 'shape') applyOutputMode();
+}
+function applyPreset(name) {
+  Object.assign(S, PRESETS[name]); save();
+  rebuild(); syncUI(); applyOutputMode();
+  toast(name);
+}
+function applyOutputMode() {
+  const cpu = S.output !== 'smooth' || !gl;
+  cv2.style.display = cpu ? 'block' : 'none';
+}
+let toastT = 0;
+function toast(msg, ms = 1600) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms); }
+
+const panel = $('#panel');
+$('#btnPanel').onclick = () => { panel.classList.toggle('open'); };
+$('#btnClose').onclick = () => panel.classList.remove('open');
+$('#btnReset').onclick = () => { rebuild(); toast('Nollställd'); };
+$('#btnDefaults').onclick = () => { S = Object.assign({}, DEFAULTS); save(); rebuild(); syncUI(); applyOutputMode(); toast('Standardvärden'); };
+$('#btnCopy').onclick = () => {
+  const txt = JSON.stringify({ cellsX: Math.round(S.cells), widthMetres: S.size, fill: S.fill, gravityG: S.gravity, inertia: S.inertia,
+    params: simParams(), output: S.output, outW: Math.round(S.outW), threshold: S.threshold, shape: S.shape }, null, 2);
+  const ok = () => toast('Inställningar kopierade');
+  try { navigator.clipboard.writeText(txt).then(ok, () => { console.log(txt); toast('Kunde inte kopiera, se konsolen'); }); }
+  catch (e) { console.log(txt); toast('Kunde inte kopiera, se konsolen'); }
+};
+$('#btnFull').onclick = async () => {
+  try {
+    if (!document.fullscreenElement) { await document.documentElement.requestFullscreen(); try { await screen.orientation.lock('portrait'); } catch (e) {} }
+    else await document.exitFullscreen();
+  } catch (e) { toast('Helskärm stöds inte här. På iPhone: Dela → Lägg till på hemskärmen.', 3200); }
+};
+$('#btnSensor').onclick = async () => {
+  const needs = typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function';
+  if (!window.isSecureContext) { toast('Rörelsesensorn kräver https. Öppna https-adressen från serve.js.', 3500); return; }
+  if (needs) {
+    try {
+      const r = await DeviceMotionEvent.requestPermission();
+      if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) { try { await DeviceOrientationEvent.requestPermission(); } catch (e) {} }
+      if (r !== 'granted') { toast('Rörelse nekad. Stäng fliken och öppna sidan igen för att få frågan på nytt.', 3500); return; }
+    } catch (e) { toast('Kunde inte fråga om rörelse: ' + e.message, 3000); return; }
+  }
+  setVal('source', 'sensor');
+  setTimeout(() => { if (!sensorAlive()) toast('Ingen rörelsedata kommer. Den här enheten har kanske ingen sensor.', 3000); }, 1200);
+  wake();
+};
+let wakeLock = null;
+async function wake() { try { if (!wakeLock && navigator.wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => wakeLock = null); } } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { wake(); last = performance.now(); } });
+
+function sensorChip(src) {
+  const b = $('#btnSensor'), label = b.querySelector('span:last-child');
+  b.classList.remove('live', 'warn');
+  if (S.source !== 'sensor') { label.textContent = S.source === 'auto' ? 'Auto' : 'Manuell'; return; }
+  if (src === 'sensor') { b.classList.add('live'); label.textContent = 'Sensor'; }
+  else if (!window.isSecureContext && /Mobi|Android|iPhone|iPad/.test(navigator.userAgent)) { b.classList.add('warn'); label.textContent = 'Kräver https'; }
+  else if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission && !motion.has) { b.classList.add('warn'); label.textContent = 'Tryck för sensor'; }
+  else label.textContent = 'Ingen sensor · auto';
+}
+
+// desktop helper: show a QR code with the phone address served by serve.js
+async function showPhoneLink() {
+  if (/Mobi|Android|iPhone|iPad/.test(navigator.userAgent)) return;
+  try {
+    let urls = null;
+    try { const r = await fetch('lan.json', { cache: 'no-store' }); if (r.ok) urls = (await r.json()).urls; } catch (e) {}
+    // hosted (e.g. GitHub Pages): point phones at this page itself
+    if ((!urls || !urls.length) && location.protocol === 'https:') urls = [location.href.split('#')[0]];
+    if (!urls || !urls.length) return;
+    const box = $('#qr'); box.innerHTML = '';
+    const holder = document.createElement('div'); box.appendChild(holder);
+    const code = document.createElement('code'); code.textContent = urls[0]; box.appendChild(code);
+    $('#qrbox').hidden = false;
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    s.onload = () => { try { new QRCode(holder, { text: urls[0], width: 112, height: 112 }); } catch (e) {} };
+    document.head.appendChild(s);
+  } catch (e) {}
+}
+
+/* ---------- loop ---------- */
+let last = performance.now(), fpsS = 60, simS = 0, frameN = 0;
+function frame(now) {
+  const dt = clamp((now - last) / 1000, 1 / 240, 1 / 30); last = now;
+  const src = updateGravity(dt);
+  updateObstacle(dt);
+  const t0 = performance.now();
+  sim.step(dt);
+  sim.computeField();
+  const t1 = performance.now();
+  simS += (t1 - t0 - simS) * 0.05; fpsS += (1 / dt - fpsS) * 0.05;
+  if (S.output === 'smooth' && gl) drawGL(); else draw2D();
+  if ((frameN++ & 15) === 0) {
+    $('#stats').textContent = `${fpsS.toFixed(0)} fps · sim ${simS.toFixed(1)} ms\n${sim.numP} partiklar · ${sim.innerX}×${sim.innerY} celler · ${sim.lastSubsteps} delsteg` +
+      (S.output !== 'smooth' ? `\nutdata ${outSize().join('×')}` : '');
+    sensorChip(src);
+  }
+  const ang = Math.atan2(-sim.gx, sim.gy);
+  $('#gdial i').style.transform = `rotate(${ang}rad) scaleY(${clamp(Math.hypot(sim.gx, sim.gy) / G0, 0.15, 1.6)})`;
+  requestAnimationFrame(frame);
+}
+
+/* ---------- boot ---------- */
+initGL();
+resize();
+rebuild();
+buildUI();
+applyOutputMode();
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+showPhoneLink();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
