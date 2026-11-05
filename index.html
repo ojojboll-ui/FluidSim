@@ -60,6 +60,7 @@ h3 { margin: 16px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.12
 .row output { font: 12px var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; align-self: center; }
 .row small { grid-column: 1 / -1; color: var(--dim); font-size: 12px; }
 .row input[type=range] { grid-column: 1 / -1; width: 100%; margin: 6px 0 2px; accent-color: var(--accent); height: 26px; }
+[hidden] { display: none !important; }
 .seg { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 4px; }
 .seg button { flex: 1 1 auto; min-width: 64px; border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 8px 8px; cursor: pointer; }
 .seg button.on { border-color: var(--accent); color: var(--accent); background: rgba(79, 195, 255, 0.08); }
@@ -216,7 +217,7 @@ function initGL() {
   const vs = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
   const fs = (deriv ? '#extension GL_OES_standard_derivatives : enable\n' : '') + `
 precision mediump float;
-uniform sampler2D f; uniform vec4 rect; uniform float viewH; uniform vec4 uv; uniform float thr; uniform float circle;
+uniform sampler2D f; uniform vec4 rect; uniform float viewH; uniform vec4 uv; uniform float thr; uniform float circle; uniform float soft;
 uniform vec3 bg, deep, shallow, foam; uniform float px;
 void main(){
   vec2 fc = vec2(gl_FragCoord.x, viewH - gl_FragCoord.y);
@@ -227,14 +228,14 @@ void main(){
   if (circle > 0.5) {
     float d = length(t - 0.5) - 0.5;
     float aa = px / rect.z;
-    inside = 1.0 - smoothstep(-aa, aa, d);
+    inside = soft > 0.5 ? 1.0 - smoothstep(-aa, aa, d) : step(d, 0.0);
     edge = 1.0 - smoothstep(0.0, aa * 2.0, abs(d - aa * 1.5));
   }
   if (inside > 0.0) {
     vec4 s = texture2D(f, mix(uv.xy, uv.zw, clamp(t, 0.0, 1.0)));
     float c = s.r * 2.0;
     ${deriv ? 'float w = max(fwidth(c), 0.02);' : 'float w = 0.06;'}
-    float a = smoothstep(thr - w, thr + w, c);
+    float a = soft > 0.5 ? smoothstep(thr - w, thr + w, c) : step(thr, c);
     float depth = smoothstep(thr + 0.05, thr + 0.4, c);
     vec3 liq = mix(shallow, deep, depth);
     liq = mix(liq, foam, smoothstep(0.35, 1.3, s.g) * 0.75);
@@ -257,7 +258,7 @@ void main(){
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  for (const n of ['f', 'rect', 'viewH', 'uv', 'thr', 'circle', 'bg', 'deep', 'shallow', 'foam', 'px']) U[n] = gl.getUniformLocation(prog, n);
+  for (const n of ['f', 'rect', 'viewH', 'uv', 'thr', 'circle', 'soft', 'bg', 'deep', 'shallow', 'foam', 'px']) U[n] = gl.getUniformLocation(prog, n);
   tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -284,6 +285,7 @@ function drawGL() {
   gl.uniform4fv(U.uv, sim.fieldUV());
   gl.uniform1f(U.thr, S.threshold);
   gl.uniform1f(U.circle, S.shape === 'circle' ? 1 : 0);
+  gl.uniform1f(U.soft, S.aa !== 'off' ? 1 : 0);
   gl.uniform1f(U.px, d);
   gl.uniform3fv(U.bg, c3(P.bg)); gl.uniform3fv(U.deep, c3(P.deep)); gl.uniform3fv(U.shallow, c3(P.shallow)); gl.uniform3fv(U.foam, c3(P.foam));
   gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -304,7 +306,7 @@ function mixc(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) 
 function draw2D() {
   const [ow, oh] = outSize(), n = ow * oh;
   if (!cov || cov.length !== n) { cov = new Float32Array(n); spd = new Float32Array(n); }
-  sim.rasterize(ow, oh, cov, spd, S.threshold, 0.12, S.aa !== 'off' || S.output === 'smooth');
+  sim.rasterize(ow, oh, cov, spd, S.threshold, 0.12, S.aa !== 'off');
   const P = PALETTES[S.palette] || PALETTES.water, d = view.dpr;
   ctx2.setTransform(1, 0, 0, 1, 0, 0);
   ctx2.fillStyle = `rgb(${P.bg})`; ctx2.fillRect(0, 0, cv2.width, cv2.height);
@@ -475,7 +477,7 @@ function buildUI() {
   seg('source', 'Gravitation från', { sensor: 'Sensor', auto: 'Auto (skärmsläckare)', manual: 'Manuell' });
   seg('shape', 'Form', SHAPES);
   seg('output', 'Utdata', { smooth: 'Slät', pixels: 'Pixlar', led: 'LED' });
-  seg('aa', 'Kantutjämning', { on: 'På', off: 'Av' }, () => S.output !== 'smooth');
+  seg('aa', 'Kantutjämning', { on: 'På', off: 'Av' });
   seg('palette', 'Färg', Object.fromEntries(Object.entries(PALETTES).map(([k, p]) => [k, p.name])));
   for (const d of SLIDERS) {
     if (d.sec) { const h = document.createElement('h3'); h.textContent = d.sec; ctl.appendChild(h); continue; }
