@@ -482,8 +482,10 @@
      * each pixel). Pixels outside a round tank get -1. `spd` (optional) gets
      * the mean speed of the liquid in each pixel. Call computeField() first.
      * For physical LEDs, apply gamma (~2.2) when converting to PWM.
+     * aa = false gives hard pixels: each one is fully on when liquid covers
+     * at least half of it, otherwise off.
      */
-    rasterize(outW, outH, cov, spd, threshold = 0.5, softness = 0.12) {
+    rasterize(outW, outH, cov, spd, threshold = 0.5, softness = 0.12, aa = true) {
       const x0 = 2, y0 = 2, iw = this.fnx - 4, ih = this.fny - 4;
       const pw = iw / outW, ph = ih / outH;
       const ssx = clamp(Math.ceil(pw), 1, 8), ssy = clamp(Math.ceil(ph), 1, 8);
@@ -505,7 +507,7 @@
             if (spd && w > 0) as += w * this._sample(this.S, fx, fy);
           }
         }
-        cov[o] = a * inv;
+        cov[o] = aa ? a * inv : (a * inv >= 0.5 ? 1 : 0);
         if (spd) spd[o] = a > 0 ? as / a : 0;
       }
     }

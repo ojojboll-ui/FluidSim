@@ -115,7 +115,7 @@ const G0 = 9.81;
 const DEFAULTS = {
   source: 'sensor', shape: 'screen', output: 'smooth', palette: 'water',
   gravity: 1, inertia: 1, size: 1, flip: 0.9, damping: 0.05, fill: 0.4, drift: 1,
-  cells: 40, iters: 30, outW: 16, threshold: 0.45, angle: 0, invert: 'auto',
+  cells: 40, iters: 30, outW: 16, threshold: 0.45, angle: 0, invert: 'auto', aa: 'on',
 };
 const PRESETS = {
   'Vatten':   { flip: 0.9, damping: 0.05, gravity: 1, size: 1, drift: 1 },
@@ -304,7 +304,7 @@ function mixc(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) 
 function draw2D() {
   const [ow, oh] = outSize(), n = ow * oh;
   if (!cov || cov.length !== n) { cov = new Float32Array(n); spd = new Float32Array(n); }
-  sim.rasterize(ow, oh, cov, spd, S.threshold, 0.12);
+  sim.rasterize(ow, oh, cov, spd, S.threshold, 0.12, S.aa !== 'off' || S.output === 'smooth');
   const P = PALETTES[S.palette] || PALETTES.water, d = view.dpr;
   ctx2.setTransform(1, 0, 0, 1, 0, 0);
   ctx2.fillStyle = `rgb(${P.bg})`; ctx2.fillRect(0, 0, cv2.width, cv2.height);
@@ -449,9 +449,10 @@ function updateObstacle(dt) {
 /* ---------- UI ---------- */
 const ctl = $('#controls');
 const inputs = {};
-function seg(key, title, opts) {
+function seg(key, title, opts, only) {
   const h = document.createElement('h3'); h.textContent = title; ctl.appendChild(h);
   const box = document.createElement('div'); box.className = 'seg'; box.dataset.key = key;
+  box.only = only; box.head = h;
   for (const [v, label] of Object.entries(opts)) {
     const b = document.createElement('button'); b.textContent = label; b.dataset.v = v;
     b.onclick = () => setVal(key, v); box.appendChild(b);
@@ -474,6 +475,7 @@ function buildUI() {
   seg('source', 'Gravitation från', { sensor: 'Sensor', auto: 'Auto (skärmsläckare)', manual: 'Manuell' });
   seg('shape', 'Form', SHAPES);
   seg('output', 'Utdata', { smooth: 'Slät', pixels: 'Pixlar', led: 'LED' });
+  seg('aa', 'Kantutjämning', { on: 'På', off: 'Av' }, () => S.output !== 'smooth');
   seg('palette', 'Färg', Object.fromEntries(Object.entries(PALETTES).map(([k, p]) => [k, p.name])));
   for (const d of SLIDERS) {
     if (d.sec) { const h = document.createElement('h3'); h.textContent = d.sec; ctl.appendChild(h); continue; }
@@ -490,7 +492,11 @@ function buildUI() {
 }
 function syncUI() {
   for (const [k, el] of Object.entries(inputs)) {
-    if (el.classList) { for (const b of el.children) b.classList.toggle('on', b.dataset.v === String(S[k])); continue; }
+    if (el.classList) {
+      for (const b of el.children) b.classList.toggle('on', b.dataset.v === String(S[k]));
+      if (el.only) el.hidden = el.head.hidden = !el.only();
+      continue;
+    }
     if (document.activeElement !== el.inp) el.inp.value = toPos(el.d, S[k]);
     el.out.textContent = el.d.fmt(S[k]);
     el.row.hidden = el.d.only ? !el.d.only() : false;
